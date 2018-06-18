@@ -1,0 +1,15 @@
+Reading data from files 'data/1_valid.csv' and 'data/categories_1000.csv'
+Preparing train and test data
+Fold 1
+Train avg accuracy = 97.739
+Test avg accuracy = 88.868
+Fold 2
+Train avg accuracy = 97.652
+Test avg accuracy = 88.998
+Fold 3
+Train avg accuracy = 97.659
+Test avg accuracy = 89.520
+Fold 4
+Train avg accuracy = 97.656
+Test avg accuracy = 88.802
+[Finished in 332.2s]

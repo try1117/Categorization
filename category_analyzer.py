@@ -1,123 +1,142 @@
+import math
+import numpy as np
+
 import pandas as pd
 from bs4 import BeautifulSoup
-import re
 import nltk
 from nltk.corpus import stopwords
-import math
-from sklearn.feature_extraction.text import CountVectorizer
-import numpy as np
-from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import LabelEncoder
+from sklearn.model_selection import KFold
 
-# TODO: more than just 'lower'
-def clean_description(description):
-    return str(description).lower()
+from sklearn.feature_extraction.text import CountVectorizer
+from sklearn.ensemble import RandomForestClassifier
 
-def main():
-    print("Reading data from .csv file")
-    data = pd.read_csv("data/1_valid.csv", encoding="UTF-16")
-    categories_full_data = pd.read_csv("data/categories_1000.csv", sep="\t", encoding="UTF-16")
-    categories_names = np.array(categories_full_data.loc[:, "_ParentIDRRef"], dtype=str)
+BASIC_ENCODING = "UTF-16"
 
-    cat_cnt = 100
-    cat_names = np.empty(cat_cnt, dtype=object)
-    cat_test_range = np.full((cat_cnt, 2), (0, 0), dtype=object) # (left index, size)
-
-    train_data = np.array([], dtype=str)
-    train_answers = np.array([], dtype=int)
-
-    test_data = np.array([], dtype=str)
-    test_answers = np.array([], dtype=int)
-
-    training_part = 0.7
-    print("Preparing train and test data")
-
+class Categorizer():
     categories_to_output = set([
-        # "81A800155D03361B11E5B9A7810E8D1E",
-        # "9B10001517D7BDE111E42760C1FF05C5",
-        # "AB470002B3552D7511DABBA4A64D4192",
-        # "8D6700155D03361B11E48FD21C46F3CA",
-        # "8F1D001517C5264411E4162B60C94D56",
-        "AFBE00155D03330D11E75587CDA72B14",
+        # "9DC3001E6728A5A411E5A84BD6487A11",
     ])
     categories_to_skip = set([\
         "AB470002B3552D7511DABBA37AA42F4A", # different goods without any visible connection between them
         "AB470002B3552D7511DABBA4A64D4192",
     ])
 
-    cat_idx, category_idx = -1, -1
-    while (cat_idx + 1 < cat_cnt and category_idx + 1 < len(categories_names)):
-        category_idx += 1
-        if (categories_names[category_idx] in categories_to_skip):
-            continue
+    def read(self, data_file, categories_file, cat_cnt):
+        print("Reading data from files '{}' and '{}'".format(data_file, categories_file))
+        products_data = pd.read_csv(data_file, encoding=BASIC_ENCODING)
+        categories_data = pd.read_csv(categories_file, sep="\t", encoding=BASIC_ENCODING)
+        categories = np.array(categories_data.loc[:, "_ParentIDRRef"], dtype=str)
 
-        cat_idx += 1
-        cat_names[cat_idx] = categories_names[category_idx]
-        cat_name = cat_names[cat_idx]
+        self.cat_cnt = cat_cnt
+        self.cat_names = np.empty(cat_cnt, dtype=object)
 
-        cur = np.array(data[data["_ParentIDRRef"] == cat_name].loc[:, "_Description"])
-        sz = cur.shape[0]
-        training_sz = int(sz * training_part)
-        test_sz = sz - training_sz
+        print("Preparing train and test data")
+        self.descriptions = np.array([], dtype=str)
+        self.categories_idx = np.array([], dtype=int)
 
-        cat_test_range[cat_idx] = (len(test_data), test_sz)
-        # shuffle array, as records in database are usually form blocks(of similar records)
-        np.random.shuffle(cur)
+        cat_idx, category_idx = -1, -1
+        while (cat_idx + 1 < cat_cnt and category_idx + 1 < len(categories_data)):
+            category_idx += 1
+            if (categories[category_idx] in self.categories_to_skip):
+                continue
 
-        train_data = np.append(train_data, cur[:training_sz])
-        train_answers = np.append(train_answers, np.full(training_sz, cat_idx, dtype=int))
+            cat_idx += 1
+            self.cat_names[cat_idx] = categories[category_idx]
+            cat_name = self.cat_names[cat_idx]
 
-        test_data = np.append(test_data, cur[training_sz:])
-        test_answers = np.append(test_answers, np.full(test_sz, cat_idx, dtype=int))
+            cur_category_descriptions = np.array(products_data[products_data["_ParentIDRRef"] == cat_name].loc[:, "_Description"])
+            sz = cur_category_descriptions.shape[0]
 
-        if (cat_name in categories_to_output):
-            with open("categories_descriptions/{}.txt".format(cat_name), "w", encoding="UTF-16") as f:
-                f.writelines(["{}\n".format(item) for item in cur])
-            # quit()
-    # quit()
+            self.descriptions = np.append(self.descriptions, cur_category_descriptions)
+            self.categories_idx = np.append(self.categories_idx, np.full(sz, cat_idx, dtype=int))
 
-    clean_train_data = np.array(list(map(clean_description, train_data)))
-    clean_test_data = np.array(list(map(clean_description, test_data)))
+            if (cat_name in self.categories_to_output):
+                with open("categories_descriptions/{}.txt".format(cat_name), "w", encoding="UTF-16") as f:
+                    f.writelines(["{}\n".format(item) for item in cur])
+                # quit()
 
-    print("Extracting feactures from data")
-    vectorizer = CountVectorizer(analyzer = "word", tokenizer = None, preprocessor = None, stop_words = None, max_features = 3000)
-    train_data_features = vectorizer.fit_transform(clean_train_data)
-    np.asarray(train_data_features)
-    test_data_features = vectorizer.transform(clean_test_data)
-    np.asarray(test_data_features)
+        # shuffle and lower descriptions
+        perm = np.random.permutation(len(self.descriptions))
+        self.descriptions = np.array(list(map(lambda x: str(x).lower(), self.descriptions[perm])))
+        self.categories_idx = self.categories_idx[perm]
 
-    print("Training the random forest")
-    forest = RandomForestClassifier(n_estimators=30, n_jobs=1, verbose=3)
-    forest = forest.fit(train_data_features, train_answers)
+    def cross_validate(self, k_fold, feature_extractor, algo):
+        # print(self.descriptions.shape)
+        kf = KFold(n_splits=k_fold)
+        fold_idx = 0
+        for train_idx, test_idx in kf.split(self.descriptions):
+            train_data, train_answers = self.descriptions[train_idx], self.categories_idx[train_idx]
+            test_data, test_answers = self.descriptions[test_idx], self.categories_idx[test_idx]
 
-    print("Applying model to the test data")
-    test_results = forest.predict(test_data_features)
+            train_features, test_features = feature_extractor.extract(train_data, test_data)
+            algo.fit(train_features, train_answers)
 
-    print("\n{} most common categories".format(cat_cnt))
+            train_results = algo.predict(train_features)
+            test_results = algo.predict(test_features)
 
-    total_correct = 0
-    total_amount = len(test_answers)
-    cat_df = pd.DataFrame(index=[i for i in range(cat_cnt)], columns=["name", "correct", "amount", "avg_correctness"])
+            train_correct = len([i for i, j in zip(train_answers, train_results) if i == j])
+            test_correct = len([i for i, j in zip(test_answers, test_results) if i == j])
 
-    for i in range(cat_cnt):
-        correct = 0
-        amount = cat_test_range[i][1]
+            fold_idx += 1
+            print("Fold {}".format(fold_idx))
+            print("Train avg accuracy = {:.3f}".format(100 * train_correct / len(train_answers)))
+            print("Test avg accuracy = {:.3f}".format(100 * test_correct / len(test_answers)))
 
-        for j in range(cat_test_range[i][0], cat_test_range[i][0] + amount):
-            if (test_answers[j] == test_results[j]):
-                correct += 1
+        quit()
 
-        cat_df.loc[i] = [cat_names[i], correct, amount, 100 * correct / amount];
-        total_correct += correct
-        print("Category {:03d} ({}) : Correct {} from {} = {:.3f} %".format(i, cat_names[i], correct, amount, 100 * correct / amount))
+        print("\n{} most common categories".format(cat_cnt))
 
-    print("\nCorrect {} from {} = {:.3f} %".format(total_correct, total_amount, 100 * total_correct / total_amount))
+        total_correct = 0
+        total_amount = len(test_answers)
+        cat_df = pd.DataFrame(index=[i for i in range(cat_cnt)], columns=["name", "correct", "amount", "avg_correctness"])
 
-    print("Categories in order of ascending correctness\n")
-    cat_df = cat_df.sort_values(by=["avg_correctness"], ascending=True)
+        for i in range(cat_cnt):
+            correct = 0
+            amount = cat_test_range[i][1]
 
-    for i, name, correct, amount, avg_corr in cat_df.itertuples(index=True, name='Pandas'):
-        print("Category {:03d} ({}) : Correct {} from {} = {:.3f} %".format(
-            i, name, correct, amount, avg_corr))
+            for j in range(cat_test_range[i][0], cat_test_range[i][0] + amount):
+                if (test_answers[j] == test_results[j]):
+                    correct += 1
+
+            cat_df.loc[i] = [cat_names[i], correct, amount, 100 * correct / amount];
+            total_correct += correct
+            print("Category {:03d} ({}) : Correct {} from {} = {:.3f} %".format(i, cat_names[i], correct, amount, 100 * correct / amount))
+
+        print("\nCorrect {} from {} = {:.3f} %".format(total_correct, total_amount, 100 * total_correct / total_amount))
+
+        print("Categories in order of ascending correctness\n")
+        cat_df = cat_df.sort_values(by=["avg_correctness"], ascending=True)
+
+        for i, name, correct, amount, avg_corr in cat_df.itertuples(index=True, name='Pandas'):
+            print("Category {:03d} ({}) : Correct {} from {} = {:.3f} %".format(
+                i, name, correct, amount, avg_corr))
+
+class NGramFeatureExtractor():
+    def __init__(self, analyzer, ngram_range, max_features, preprocessor=None):
+        self.vectorizer = CountVectorizer(analyzer=analyzer, tokenizer=None, ngram_range=ngram_range, max_features=max_features,
+            preprocessor=preprocessor, encoding=BASIC_ENCODING)
+
+    def extract(self, train_data, test_data):
+        train_data_features = self.vectorizer.fit_transform(train_data)
+        np.asarray(train_data_features)
+        test_data_features = self.vectorizer.transform(test_data)
+        np.asarray(test_data_features)
+        return train_data_features, test_data_features
+
+class RandomForestAlgorithm():
+    def __init__(self, n_estimators, n_jobs=1, verbose=0):
+        self.model = RandomForestClassifier(n_estimators=n_estimators, n_jobs=n_jobs, verbose=verbose)
+
+    def fit(self, train_features, train_answers):
+        self.model = self.model.fit(train_features, train_answers)
+
+    def predict(self, test_features):
+        return self.model.predict(test_features)
+
+def main():
+    ctg = Categorizer()
+    ctg.read("data/1_valid.csv", "data/categories_1000.csv", cat_cnt = 100)
+    ctg.cross_validate(4, NGramFeatureExtractor("word", (1, 1), 3000), RandomForestAlgorithm(30))
 
 main()
