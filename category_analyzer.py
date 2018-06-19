@@ -1,5 +1,7 @@
 import math
 import numpy as np
+import sys
+import matplotlib.pyplot as plt
 
 import pandas as pd
 from bs4 import BeautifulSoup
@@ -10,6 +12,9 @@ from sklearn.model_selection import KFold
 
 from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.naive_bayes import GaussianNB
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.linear_model import LogisticRegression
 
 BASIC_ENCODING = "UTF-16"
 
@@ -24,6 +29,13 @@ class Categorizer():
 
     def read(self, data_file, categories_file, cat_cnt):
         print("Reading data from files '{}' and '{}'".format(data_file, categories_file))
+
+        # chunksize = 10 ** 6
+        # for products_data in pd.read_csv(data_file, encoding=BASIC_ENCODING, chunksize=chunksize):
+        #     continue
+
+        # quit()
+
         products_data = pd.read_csv(data_file, encoding=BASIC_ENCODING)
         categories_data = pd.read_csv(categories_file, sep="\t", encoding=BASIC_ENCODING)
         categories = np.array(categories_data.loc[:, "_ParentIDRRef"], dtype=str)
@@ -60,11 +72,22 @@ class Categorizer():
         perm = np.random.permutation(len(self.descriptions))
         self.descriptions = np.array(list(map(lambda x: str(x).lower(), self.descriptions[perm])))
         self.categories_idx = self.categories_idx[perm]
+        return self
 
     def cross_validate(self, k_fold, feature_extractor, algo):
         # print(self.descriptions.shape)
+        self.k_fold = k_fold
         kf = KFold(n_splits=k_fold)
         fold_idx = 0
+        self.train_answers = np.empty(k_fold, dtype=object)
+        self.test_answers = np.empty(k_fold, dtype=object)
+
+        self.train_results = np.empty(k_fold, dtype=object)
+        self.test_results = np.empty(k_fold, dtype=object)
+
+        self.train_accuracy = np.empty(k_fold, dtype=float)
+        self.test_accuracy = np.empty(k_fold, dtype=float)
+
         for train_idx, test_idx in kf.split(self.descriptions):
             train_data, train_answers = self.descriptions[train_idx], self.categories_idx[train_idx]
             test_data, test_answers = self.descriptions[test_idx], self.categories_idx[test_idx]
@@ -78,11 +101,25 @@ class Categorizer():
             train_correct = len([i for i, j in zip(train_answers, train_results) if i == j])
             test_correct = len([i for i, j in zip(test_answers, test_results) if i == j])
 
-            fold_idx += 1
-            print("Fold {}".format(fold_idx))
-            print("Train avg accuracy = {:.3f}".format(100 * train_correct / len(train_answers)))
-            print("Test avg accuracy = {:.3f}".format(100 * test_correct / len(test_answers)))
+            self.train_answers[fold_idx] = train_answers
+            self.test_answers[fold_idx] = test_answers
+            self.train_results[fold_idx] = train_results
+            self.test_results[fold_idx] = test_results
 
+            self.train_accuracy[fold_idx] = 100 * train_correct / len(train_answers)
+            self.test_accuracy[fold_idx] = 100 * test_correct / len(test_answers)
+
+            print("Fold {}".format(fold_idx))
+            print("Train avg accuracy = {:.3f}".format(self.train_accuracy[fold_idx]))
+            print("Test avg accuracy = {:.3f}".format(self.test_accuracy[fold_idx]))
+            fold_idx += 1
+
+        return self
+
+    def output_results(self):
+        fig, ax = plt.subplots()
+        ax.boxplot([self.train_accuracy, self.test_accuracy])
+        plt.show()
         quit()
 
         print("\n{} most common categories".format(cat_cnt))
@@ -129,6 +166,55 @@ class RandomForestAlgorithm():
         self.model = RandomForestClassifier(n_estimators=n_estimators, n_jobs=n_jobs, verbose=verbose)
 
     def fit(self, train_features, train_answers):
+        self.model.fit(train_features, train_answers)
+
+    def predict(self, test_features):
+        return self.model.predict(test_features)
+
+class NaiveBayesAlgorithm():
+    def __init__(self):
+        self.model = GaussianNB()
+
+    def fit(self, train_features, train_answers):
+        # print(train_features.shape)
+        # print(train_answers.shape)
+        self.model = self.model.fit(train_features.todense(), train_answers)
+
+    def predict(self, test_features):
+        return self.model.predict(test_features.todense())
+
+class KNeighborsAlgorithm():
+    def __init__(self, n_neighbors):
+        self.model = KNeighborsClassifier(n_neighbors=n_neighbors)
+
+    def fit(self, train_features, train_answers):
+        # print(train_features.shape)
+        # print(train_answers.shape)
+        self.model.fit(train_features, train_answers)
+        print("Fit done")
+
+    def predict(self, test_features):
+        # print(type(test_features))
+        # print(test_features.shape)
+        # print(test_features.getnnz(), test_features[0].getnnz())
+        # print(test_features.size)
+        # print(test_features.dtype.itemsize)
+        # print(test_features.size * test_features.dtype.itemsize)
+        # tmp = test_features
+        # print(sys.getsizeof(tmp))
+        # print(tmp.shape)
+        # tmp = test_features.todense()
+        # print(len(tmp) * len(tmp[0]) * sys.getsizeof(tmp[0][0]))
+        # print(tmp.shape)
+        return self.model.predict(test_features)
+
+class LogRegressionAlgorithm():
+    def __init__(self, penalty='l1', tol=0.01):
+        self.model = LogisticRegression(penalty=penalty, tol=tol)
+
+    def fit(self, train_features, train_answers):
+        # print(train_features.shape)
+        # print(train_answers.shape)
         self.model = self.model.fit(train_features, train_answers)
 
     def predict(self, test_features):
@@ -136,7 +222,18 @@ class RandomForestAlgorithm():
 
 def main():
     ctg = Categorizer()
+
     ctg.read("data/1_valid.csv", "data/categories_1000.csv", cat_cnt = 100)
-    ctg.cross_validate(4, NGramFeatureExtractor("word", (1, 1), 3000), RandomForestAlgorithm(30))
+
+    # print("done")
+    # ctg.cross_validate(4, NGramFeatureExtractor("word", (1, 1), 3000), RandomForestAlgorithm(10))
+    # ctg.cross_validate(4, NGramFeatureExtractor("word", (1, 1), 1000), NaiveBayesAlgorithm())
+    # ctg.cross_validate(4, NGramFeatureExtractor("word", (1, 1), 1000), KNeighborsAlgorithm(3))
+    ctg.cross_validate(4, NGramFeatureExtractor("word", (1, 1), 3000), LogRegressionAlgorithm())
+
+    # ctg.cross_validate(4, NGramFeatureExtractor("char", (2, 2), 3000), RandomForestAlgorithm(30))
+    ctg.output_results()
+
+    # TODO: show 10 worst categories using box-plot
 
 main()
