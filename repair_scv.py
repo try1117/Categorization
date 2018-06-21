@@ -7,6 +7,27 @@ import math
 from sklearn.feature_extraction.text import CountVectorizer
 import numpy as np
 from sklearn.ensemble import RandomForestClassifier
+import csv
+
+def to_normal_csv(file_name):
+    data = pd.read_csv(file_name, encoding='UTF-16')
+    data.to_csv(file_name[:-4] + "_utf8.csv", sep=",", quoting=csv.QUOTE_ALL, index=False, encoding='UTF-8')
+    print(file_name + " done")
+
+def process_products_file(file_name):
+    data = pd.read_csv(file_name, encoding='UTF-16')
+
+    print("Size before: {}".format(data.shape[0]))
+    data = data[data._Folder != 0]
+    print("Size after: {}".format(data.shape[0]))
+
+    data.to_csv(file_name[:-4] + "_clear_utf8.csv", sep=",", quoting=csv.QUOTE_ALL, index=False, encoding='UTF-8')
+    print(file_name + " done")
+
+# to_normal_csv("data/my/nomenclature.csv")
+# to_normal_csv("data/my/product_nomenclature.csv")
+process_products_file("data/my/products_dns.csv")
+quit()
 
 def good_line(line, comma_cnt):
     if (line[0] != "\"" or line[0] != "\"" or line.count(',') != comma_cnt):
