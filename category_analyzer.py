@@ -1,6 +1,7 @@
 import math
 import numpy as np
 import sys
+import pickle
 
 # preprocessing
 import pandas as pd
@@ -37,7 +38,7 @@ class Categorizer():
         "AB470002B3552D7511DABBA4A64D4192",
     ])
 
-    def read(self, data_file, categories_file, cat_cnt):
+    def old_read(self, data_file, categories_file, cat_cnt):
         print("Reading data from files '{}' and '{}'".format(data_file, categories_file))
 
         # chunksize = 10 ** 6
@@ -46,52 +47,116 @@ class Categorizer():
 
         # quit()
 
-        products_data = pd.read_csv(data_file, encoding=BASIC_ENCODING)
-        categories_data = pd.read_csv(categories_file, sep="\t", encoding=BASIC_ENCODING)
-        categories = np.array(categories_data.loc[:, "_ParentIDRRef"], dtype=str)
+        products_raw_data = pd.read_csv(data_file, encoding=BASIC_ENCODING)
+        categories_raw_data = pd.read_csv(categories_file, encoding=BASIC_ENCODING)
+        # cat_cnt = min(cat_cnt, categories_raw_data.shape[0])
+        self.categories_data = pd.DataFrame({"id": np.empty(cat_cnt, dtype=str), "name": np.empty(cat_cnt, dtype=str)}, columns=["id", "name"])
 
-        self.cat_cnt = cat_cnt
-        self.cat_names = np.empty(cat_cnt, dtype=object)
-
-        print("Preparing train and test data")
+        print("Preprocessing descriptions")
+        self.cat_cnt, cat_idx = cat_cnt, 0
         self.descriptions = np.array([], dtype=str)
-        self.categories_idx = np.array([], dtype=int)
+        self.desc_to_cat_idx = np.array([], dtype=int)
 
-        cat_idx, category_idx = -1, -1
-        while (cat_idx + 1 < cat_cnt and category_idx + 1 < len(categories_data)):
-            category_idx += 1
-            if (categories[category_idx] in self.categories_to_skip):
+        for index, row in categories_raw_data.iterrows():
+            if (index % 100 == 0):
+                print("Done {} %".format(index / categories_raw_data.shape[0] * 100))
+            if (row["category_id"] in Categorizer.categories_to_skip):
                 continue
+            self.categories_data.iloc[cat_idx] = [row["category_id"], row["category_name"]]
 
-            cat_idx += 1
-            self.cat_names[cat_idx] = categories[category_idx]
-            cat_name = self.cat_names[cat_idx]
-
-            cur_category_descriptions = np.array(products_data[products_data["_ParentIDRRef"] == cat_name].loc[:, "_Description"])
+            cur_category_descriptions = np.array(products_raw_data[products_raw_data["category_id"] == row["category_id"]].loc[:, "description"])
             sz = cur_category_descriptions.shape[0]
 
             self.descriptions = np.append(self.descriptions, cur_category_descriptions)
-            self.categories_idx = np.append(self.categories_idx, np.full(sz, cat_idx, dtype=int))
+            self.desc_to_cat_idx = np.append(self.desc_to_cat_idx, np.full(sz, self.categories_data.shape[0] - 1, dtype=int))
 
-            if (cat_name in self.categories_to_output):
-                with open("categories_descriptions/{}.txt".format(cat_name), "w", encoding="UTF-16") as f:
+            if (row["category_id"] in self.categories_to_output):
+                with open("categories_descriptions/{}.txt".format(row["category_id"]), "w", encoding="UTF-16") as f:
+                    f.writeline("Category name: {}".format(row["category_name"]))
                     f.writelines(["{}\n".format(item) for item in cur])
+
+        # cat_idx, category_idx = -1, -1
+        # while (cat_idx + 1 < cat_cnt and category_idx + 1 < len(categories_data)):
+        #     category_idx += 1
+        #     if (categories[category_idx] in self.categories_to_skip):
+        #         continue
+
+        #     cat_idx += 1
+        #     self.cat_indices[cat_idx] = categories[category_idx]
+        #     cat_name = self.cat_indices[cat_idx]
+
+        #     cur_category_descriptions = np.array(products_data[products_data["category_id"] == cat_id].loc[:, "_Description"])
+        #     sz = cur_category_descriptions.shape[0]
+
+        #     self.descriptions = np.append(self.descriptions, cur_category_descriptions)
+        #     self.categories_idx = np.append(self.categories_idx, np.full(sz, cat_idx, dtype=int))
+
+        #     if (cat_name in self.categories_to_output):
+        #         with open("categories_descriptions/{}.txt".format(cat_name), "w", encoding="UTF-16") as f:
+        #             f.writelines(["{}\n".format(item) for item in cur])
                 # quit()
 
         # shuffle and lower descriptions
         perm = np.random.permutation(len(self.descriptions))
         self.descriptions = np.array(list(map(lambda x: str(x).lower(), self.descriptions[perm])))
-        self.categories_idx = self.categories_idx[perm]
+        self.desc_to_cat_idx = self.desc_to_cat_idx[perm]
+        return self
+
+    def new_read(self, data_file, categories_file, cat_cnt):
+        print("Reading data from files '{}' and '{}'".format(data_file, categories_file))
+        products_raw_data = pd.read_csv(data_file, encoding=BASIC_ENCODING)
+        categories_raw_data = pd.read_csv(categories_file, encoding=BASIC_ENCODING)
+        # cat_cnt = min(cat_cnt, categories_raw_data.shape[0])
+        self.categories_data = pd.DataFrame({"id": np.empty(cat_cnt, dtype=str), "size": np.empty(cat_cnt, dtype=str),
+            "name": np.empty(cat_cnt, dtype=str)}, columns=["id", "size", "name"])
+
+        print("Preprocessing descriptions")
+        products_index = 0
+        cat_real_size = np.empty(cat_cnt, dtype=object)
+
+        for i in range(cat_cnt):
+            cur_category_id = products_raw_data.iloc[products_index]["category_id"]
+            cur_category_name = categories_raw_data[categories_raw_data["category_id"] == cur_category_id].iloc[0]["category_name"]
+
+            cat_real_size[i] = products_index
+            while (products_raw_data.iloc[products_index]["category_id"] == cur_category_id):
+                products_index += 1
+
+            cat_real_size[i] = products_index - cat_real_size[i]
+            self.categories_data.iloc[i] = [cur_category_id, cat_real_size[i], cur_category_name]
+
+            if (i % 10 == 0):
+                print("Done {:02d} from {:02d} categories".format(i + 1, cat_cnt))
+            # print(cat_real_size[i], cur_category_name)
+
+        self.descriptions = np.array(products_raw_data.loc[:products_index - 1, "description"])
+        self.desc_to_cat_idx = np.empty(products_index, dtype=int)
+
+        acc_sz = 0
+        for i in range(cat_cnt):
+            for j in range(cat_real_size[i]):
+                self.desc_to_cat_idx[acc_sz + j] = i
+            acc_sz += cat_real_size[i]
+
+        # shuffle and lower descriptions
+        perm = np.random.permutation(len(self.descriptions))
+        self.descriptions = np.array(list(map(lambda x: str(x).lower(), self.descriptions[perm])))
+        self.desc_to_cat_idx = self.desc_to_cat_idx[perm]
+
         return self
 
     def cross_validate(self, k_fold, feature_extractor, algo):
         kf = KFold(n_splits=k_fold)
-        cr = ClassifierResults(k_fold, feature_extractor, algo)
+        cr = ClassifierResults(k_fold, self.categories_data, feature_extractor, algo)
         fold_idx = 0
 
-        for train_idx, test_idx in kf.split(self.descriptions):
-            train_data, train_answers = self.descriptions[train_idx], self.categories_idx[train_idx]
-            test_data, test_answers = self.descriptions[test_idx], self.categories_idx[test_idx]
+        print("{}-fold cross-validate".format(k_fold))
+        print("Feature extractor: {}".format(feature_extractor.get_information()))
+        print("Algorithm: {}".format(algo.get_information()))
+
+        for test_idx, train_idx in kf.split(self.descriptions):
+            train_data, train_answers = self.descriptions[train_idx], self.desc_to_cat_idx[train_idx]
+            test_data, test_answers = self.descriptions[test_idx], self.desc_to_cat_idx[test_idx]
 
             train_features, test_features = feature_extractor.extract(train_data, test_data)
             algo.fit(train_features, train_answers)
@@ -152,8 +217,12 @@ class Categorizer():
                 i, name, correct, amount, avg_corr))
 
 class ClassifierResults():
-    def __init__(self, k_fold, feature_extractor, algo):
+    def __init__(self, k_fold, categories_data, feature_extractor, algo):
         self.k_fold = k_fold
+
+        self.categories_name = np.array(categories_data["name"])
+        self.categories_size = np.array(categories_data["size"])
+
         self.train_answers = np.empty(k_fold, dtype=object)
         self.test_answers = np.empty(k_fold, dtype=object)
 
@@ -163,22 +232,59 @@ class ClassifierResults():
         self.train_accuracy = np.empty(k_fold, dtype=float)
         self.test_accuracy = np.empty(k_fold, dtype=float)
 
-        self.feature_extractor = feature_extractor.get_information()
-        self.algo = algo.get_information()
+        self.feature_extractor_info = feature_extractor.get_information()
+        self.algo_info = algo.get_information()
 
     def save(self, file_name):
         writer = pd.ExcelWriter(file_name)
-        tr = pd.DataFrame({"true_answers": self.train_answers, "results": self.train_results})
-        te = pd.DataFrame({"true_answers": self.test_answers, "results": self.test_results})
-        acc = pd.DataFrame({"train_accuracy": self.train_accuracy, "test_accuracy": self.test_accuracy})
-        feature_info = pd.DataFrame(self.feature_extractor)
-        algo_info = pd.DataFrame(self.algo)
+        total_acc = pd.DataFrame({"train_accuracy": self.train_accuracy, "test_accuracy": self.test_accuracy}, columns=["train_accuracy", "test_accuracy"])
 
-        tr.to_excel(writer, "train_answers")
-        te.to_excel(writer, "test_answers")
-        acc.to_excel(writer, "accuracy")
-        feature_info.to_excel(writer, "features_info")
-        algo_info.to_excel(writer, "algorithm_info")
+        cat_cnt = len(self.categories_name)
+        train_categories_correct = np.zeros((self.k_fold, cat_cnt), dtype=int)
+        test_categories_correct = np.zeros((self.k_fold, cat_cnt), dtype=int)
+
+        train_categories_size = np.zeros((self.k_fold, cat_cnt), dtype=int)
+        test_categories_size = np.zeros((self.k_fold, cat_cnt), dtype=int)
+
+        for k in range(self.k_fold):
+            for i in range(len(self.train_answers[k])):
+                cur_cat = self.train_answers[k][i]
+                if cur_cat == self.train_results[k][i]:
+                    train_categories_correct[k][cur_cat] += 1
+                train_categories_size[k][cur_cat] += 1
+
+        for k in range(self.k_fold):
+            for i in range(len(self.test_answers[k])):
+                cur_cat = self.test_answers[k][i]
+                if cur_cat == self.test_results[k][i]:
+                    test_categories_correct[k][cur_cat] += 1
+                test_categories_size[k][cur_cat] += 1
+
+        train_categories_data = np.transpose([100 * train_categories_correct[k] / train_categories_size[k] for k in range(self.k_fold)])
+        test_categories_data = np.transpose([100 * test_categories_correct[k] / test_categories_size[k] for k in range(self.k_fold)])
+        train_test_delta = np.abs(train_categories_data - test_categories_data)
+
+        train_categories_data = np.array([np.append(train_categories_data[i], [np.average(train_categories_data[i])]) for i in range(cat_cnt)])
+        test_categories_data = np.array([np.append(test_categories_data[i], [np.average(test_categories_data[i])]) for i in range(cat_cnt)])
+        train_test_delta = np.array([np.append(train_test_delta[i], [np.average(train_test_delta[i])]) for i in range(cat_cnt)])
+
+        tr_df = pd.DataFrame(train_categories_data, index=self.categories_name,
+            columns=["Fold {}".format(k + 1) for k in range(self.k_fold)] + ["Folds avg"])
+
+        te_df = pd.DataFrame(test_categories_data, index=self.categories_name,
+            columns=["Fold {}".format(k + 1) for k in range(self.k_fold)] + ["Folds avg"])
+
+        delta_df = pd.DataFrame(train_test_delta, index=self.categories_name,
+            columns=["Fold {}".format(k + 1) for k in range(self.k_fold)] + ["Folds avg"])
+
+        feature_algo = pd.DataFrame([self.feature_extractor_info, self.algo_info], index=["Feature extractor", "Algorithm"], columns=["name", "parameters"])
+
+        tr_df.to_excel(writer, "train accuracy")
+        te_df.to_excel(writer, "test accuracy")
+        delta_df.to_excel(writer, "delta between train and test")
+        total_acc.to_excel(writer, "overall accuracy")
+        feature_algo.to_excel(writer, "features and algorithm")
+        writer.save()
 
 class DescriptionPreprocessor():
     @staticmethod
@@ -215,7 +321,7 @@ class NGramFeatureExtractor():
         return train_data_features, test_data_features
 
     def get_information(self):
-        return {"name": "N-gram", "parameters": "type: {};\trange: {}\tfeatures: {}".format(self.analyzer, self.ngram_range, self.max_features)}
+        return {"name": "N-gram", "parameters": "type: {};\trange: {};\tfeatures: {}".format(self.analyzer, self.ngram_range, self.max_features)}
 
 class Word2VecFeatureExtractor():
     def inialize(self, descriptions, num_features, workers, min_word_count, context, downsampling):
@@ -350,18 +456,19 @@ class LogRegressionAlgorithm():
 
 def main():
     ctg = Categorizer()
-    ctg.read("data/utf-8/2_final_tables/.csv", "data/categories_1000.csv", cat_cnt = 10)
+    ctg.new_read("data/utf-8/2_final_tables/products_dns_short_sorted_utf8.csv", "data/utf-8/2_final_tables/categories_short_utf8.csv", cat_cnt = 40)
+    # quit()
 
     # word2vec_extractor = Word2VecFeatureExtractor().initialize(ctg.descriptions, 300, 4, 3, 2, 1e-3)
-    word2vec_extractor = Word2VecFeatureExtractor().load("word2vec_models/features=300_mincount=3_context=2")
+    # word2vec_extractor = Word2VecFeatureExtractor().load("word2vec_models/features=300_mincount=3_context=2")
 
-    unigram_word = NGramFeatureExtractor("word", (1, 1), 3000, DescriptionPreprocessor.simple_processing)
+    unigram_word = NGramFeatureExtractor("word", (1, 1), 1000, DescriptionPreprocessor.simple_processing)
     bigram_word = NGramFeatureExtractor("word", (2, 2), 3000, DescriptionPreprocessor.simple_processing)
     bigram_char = NGramFeatureExtractor("char", (2, 3), 3000, DescriptionPreprocessor.special_processing)
     bigram_char_spaces = NGramFeatureExtractor("char", (2, 3), 3000, DescriptionPreprocessor.simple_processing)
 
     cr_forest = ctg.cross_validate(4, unigram_word, RandomForestAlgorithm(10))
-    cr_forest.save('forest.xlsx')
+    cr_forest.save("output/forest.xlsx")
     quit()
 
     features = [unigram_word, bigram_word, bigram_char, bigram_char_spaces]
