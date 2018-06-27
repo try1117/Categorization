@@ -31,12 +31,15 @@ import csv
 BASIC_ENCODING = "UTF-8"
 
 class Categorizer():
-    categories_to_output = set([
-        # "9DC3001E6728A5A411E5A84BD6487A11",
+    categories_to_print = set([
+        # "938D00155D03330D11E7945E3C3A3C2D", # "ЗИП (для ценообразования)"
+        # "B78C00155D03330711E647D81D5EE2A7", # "Комплектующая для сборки (СБОРКА)"
+        "B24E00155D030B1F11E270E6F5145C40", # "Наушники накладные"
+        "B24E00155D030B1F11E271C0D0DB7C45", # "Наушники вкладыши"
     ])
     categories_to_skip = set([\
-        "AB470002B3552D7511DABBA37AA42F4A", # different goods without any visible connection between them
-        "AB470002B3552D7511DABBA4A64D4192",
+        "938D00155D03330D11E7945E3C3A3C2D", # "ЗИП (для ценообразования)"
+        "B78C00155D03330711E647D81D5EE2A7", # "Комплектующая для сборки (СБОРКА)"
     ])
 
     def read(self, data_file, categories_file, cat_cnt):
@@ -53,6 +56,9 @@ class Categorizer():
         self.descriptions = np.empty(cat_cnt, dtype=object)
 
         for i in range(cat_cnt):
+            while products_raw_data.iloc[products_index]["category_id"] in self.categories_to_skip:
+                products_index += 1
+
             cur_category_id = products_raw_data.iloc[products_index]["category_id"]
             cur_category_name = categories_raw_data[categories_raw_data["category_id"] == cur_category_id].iloc[0]["category_name"]
 
@@ -62,6 +68,11 @@ class Categorizer():
 
             self.descriptions[i] = np.array(products_raw_data.loc[left:products_index-1, "description"])
             self.categories_data.iloc[i] = [cur_category_id, products_index - left, cur_category_name]
+
+            if cur_category_id in self.categories_to_print:
+                with open("categories_descriptions/{}.txt".format(cur_category_id), "w", encoding=BASIC_ENCODING) as f:
+                    f.writelines(["{}\n".format(item) for item in self.descriptions[i]])
+                # quit()
 
             if ((i + 1) % 10 == 0):
                 print("Processing | categories: {:02d} from {:02d} | descriptions: {}".format(i + 1, cat_cnt, products_index))
@@ -168,20 +179,20 @@ class Categorizer():
             # test algorithm on the same trainset
             for i in range(self.cat_cnt):
                 train_data = self.descriptions[i][permutations[i][:cr.train_sizes[i]["size"]]]
-                # print("Train data shape {}".format(train_data.shape))
-                # print("Train data itself:")
-                # print(train_data)
-                # print("\n\n\n\n")
-
                 train_features = feature_extractor.transform(train_data)
-                # print("Train features shape {}".format(train_features.shape))
                 train_results = algo.predict(train_features)
                 cr.categories_train_score[r][i] = len([res for res in train_results if res == i])
                 cr.total_train_score[r] += cr.categories_train_score[r][i]
 
+                # analyze our errors
+                if r == 0:
+                    cr.categories_train_twins[i] = {}
+                    for res in train_results:
+                        if res != i:
+                            cr.categories_train_twins[i][res] = cr.categories_train_twins[i].get(res, 0) + 1
+
                 if verbose >= 2:
                     print("Done {:02d} from {:02d}".format(i + 1, self.cat_cnt))
-                # TODO: analyze our errors
 
             if verbose >= 2:
                 print("Testing algorithm on testset")
@@ -194,9 +205,15 @@ class Categorizer():
                 cr.categories_test_score[r][i] = len([res for res in test_results if res == i])
                 cr.total_test_score[r] += cr.categories_test_score[r][i]
 
+                # analyze our errors
+                if r == 0:
+                    cr.categories_test_twins[i] = {}
+                    for res in test_results:
+                        if res != i:
+                            cr.categories_test_twins[i][res] = cr.categories_test_twins[i].get(res, 0) + 1
+
                 if verbose >= 2:
                     print("Done {:02d} from {:02d}".format(i + 1, self.cat_cnt))
-                # TODO: analyze our errors
 
             print("Round {}".format(r + 1))
             print("Train avg accuracy = {:.3f}".format(100 * cr.total_train_score[r] / cr.total_train_size))
@@ -209,33 +226,6 @@ class Categorizer():
         ax.boxplot([cr.test_accuracy for cr in classifier_results])
         plt.show()
         quit()
-
-        # print("\n{} most common categories".format(cat_cnt))
-
-        # total_correct = 0
-        # total_amount = len(test_answers)
-        # cat_df = pd.DataFrame(index=[i for i in range(cat_cnt)], columns=["name", "correct", "amount", "avg_correctness"])
-
-        # for i in range(cat_cnt):
-        #     correct = 0
-        #     amount = cat_test_range[i][1]
-
-        #     for j in range(cat_test_range[i][0], cat_test_range[i][0] + amount):
-        #         if (test_answers[j] == test_results[j]):
-        #             correct += 1
-
-        #     cat_df.loc[i] = [cat_names[i], correct, amount, 100 * correct / amount];
-        #     total_correct += correct
-        #     print("Category {:03d} ({}) : Correct {} from {} = {:.3f} %".format(i, cat_names[i], correct, amount, 100 * correct / amount))
-
-        # print("\nCorrect {} from {} = {:.3f} %".format(total_correct, total_amount, 100 * total_correct / total_amount))
-
-        # print("Categories in order of ascending correctness\n")
-        # cat_df = cat_df.sort_values(by=["avg_correctness"], ascending=True)
-
-        # for i, name, correct, amount, avg_corr in cat_df.itertuples(index=True, name='Pandas'):
-        #     print("Category {:03d} ({}) : Correct {} from {} = {:.3f} %".format(
-        #         i, name, correct, amount, avg_corr))
 
 class ClassifierResults():
     def __init__(self, rounds, categories_data, feature_extractor, algo):
@@ -250,6 +240,9 @@ class ClassifierResults():
         self.total_test_score = np.zeros(rounds, dtype=int)
         self.total_train_score = np.zeros(rounds, dtype=int)
         self.total_train_size, self.total_test_size = 0, 0
+
+        self.categories_train_twins = np.empty(self.cat_cnt, dtype=dict)
+        self.categories_test_twins = np.empty(self.cat_cnt, dtype=dict)
 
         self.feature_extractor_info = feature_extractor.get_information()
         self.algo_info = algo.get_information()
@@ -321,20 +314,43 @@ class ClassifierResults():
         test_categories_data = np.array([np.append(test_categories_data[i], [np.average(test_categories_data[i])]) for i in range(self.cat_cnt)])
         train_test_delta = np.array([np.append(train_test_delta[i], [np.average(train_test_delta[i])]) for i in range(self.cat_cnt)])
 
-        tr_df = pd.DataFrame(train_categories_data, index=self.categories_name,
+        tr_acc = pd.DataFrame(train_categories_data, index=self.categories_name,
             columns=["Fold {}".format(k + 1) for k in range(self.rounds)] + ["Folds avg"])
 
-        te_df = pd.DataFrame(test_categories_data, index=self.categories_name,
+        te_acc = pd.DataFrame(test_categories_data, index=self.categories_name,
             columns=["Fold {}".format(k + 1) for k in range(self.rounds)] + ["Folds avg"])
 
-        delta_df = pd.DataFrame(train_test_delta, index=self.categories_name,
+        delta_acc = pd.DataFrame(train_test_delta, index=self.categories_name,
             columns=["Fold {}".format(k + 1) for k in range(self.rounds)] + ["Folds avg"])
+
+        # print(self.categories_train_twins)
+        # print(self.categories_test_twins)
+
+        # for each category show top-3 the most similar to it categories
+        train_twins_data = np.empty((self.cat_cnt, 3), dtype=object)
+        test_twins_data = np.empty((self.cat_cnt, 3), dtype=object)
+        for i in range(self.cat_cnt):
+            sorted_by_value = sorted(self.categories_train_twins[i].items(), key=lambda kv: kv[1], reverse=True)
+            for j in range(min(len(sorted_by_value), 3)):
+                train_twins_data[i][j] = ("{:.02f}".format(100 * sorted_by_value[j][1] / tr_sizes[i]),
+                    self.categories_name[sorted_by_value[j][0]])
+
+            sorted_by_value = sorted(self.categories_test_twins[i].items(), key=lambda kv: kv[1], reverse=True)
+            for j in range(min(len(sorted_by_value), 3)):
+                test_twins_data[i][j] = ("{:.02f}".format(100 * sorted_by_value[j][1] / te_sizes[i]),
+                    self.categories_name[sorted_by_value[j][0]])
+
+        tr_twins = pd.DataFrame(train_twins_data, index=self.categories_name, columns=["Top-1", "Top-2", "Top-3"])
+        te_twins = pd.DataFrame(test_twins_data, index=self.categories_name, columns=["Top-1", "Top-2", "Top-3"])
 
         feature_algo = pd.DataFrame([self.feature_extractor_info, self.algo_info], index=["Feature extractor", "Algorithm"], columns=["name", "parameters"])
 
-        tr_df.to_excel(writer, "train accuracy")
-        te_df.to_excel(writer, "test accuracy")
-        delta_df.to_excel(writer, "delta between train and test")
+        tr_acc.to_excel(writer, "train accuracy")
+        te_acc.to_excel(writer, "test accuracy")
+        delta_acc.to_excel(writer, "delta between train and test")
+        tr_twins.to_excel(writer, "train categories-twins")
+        te_twins.to_excel(writer, "test categories-twins")
+
         total_acc.to_excel(writer, "overall accuracy")
         feature_algo.to_excel(writer, "features and algorithm")
         writer.save()
@@ -544,8 +560,8 @@ def main():
     ctg.read("data/utf-8/2_final_tables/products_dns_short_sorted_utf8.csv", "data/utf-8/2_final_tables/categories_utf8.csv", cat_cnt = 40)
     # quit()
 
-    word2vec_extractor = Word2VecFeatureExtractor().initialize(ctg.descriptions, ctg.total_descriptions_cnt, 300, 4, 3, 2, 1e-3)
-    # word2vec_extractor = Word2VecFeatureExtractor().load("word2vec_models/features=300_mincount=3_context=2")
+    # word2vec_extractor = Word2VecFeatureExtractor().initialize(ctg.descriptions, ctg.total_descriptions_cnt, 300, 4, 3, 2, 1e-3)
+    word2vec_extractor = Word2VecFeatureExtractor().load("word2vec_models/features=300_mincount=3_context=2")
     # print(len(word2vec_extractor.index2word_set))
     # print(word2vec_extractor.index2word_set)
     # quit()
