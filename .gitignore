@@ -3,3 +3,4 @@ categories_descriptions/
 word2vec_models/
 models/
 output/
+cython/
