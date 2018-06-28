@@ -1,5 +1,6 @@
 import math
 import numpy as np
+import scipy
 import sys
 import pickle
 
@@ -26,6 +27,7 @@ from sklearn.model_selection import KFold
 # output
 import matplotlib.pyplot as plt
 import csv
+from sklearn.manifold import TSNE
 
 # BASIC_ENCODING = "UTF-16"
 BASIC_ENCODING = "UTF-8"
@@ -226,6 +228,30 @@ class Categorizer():
         ax.boxplot([cr.test_accuracy for cr in classifier_results])
         plt.show()
         quit()
+
+    def draw_categories(self, draw_cnt, feature_extractor):
+        x = np.array([], dtype=object)
+        y = np.array([], dtype=int)
+        draw_cnt[0] = min(draw_cnt[0], len(self.descriptions))
+        for i in range(draw_cnt[0]):
+            x = np.append(x, self.descriptions[i][:draw_cnt[1]])
+            y = np.append(y, [i] * draw_cnt[1])
+
+        tsne = TSNE(n_components=2, random_state=0)
+        x = feature_extractor.fit_transform(x)
+        if scipy.sparse.issparse(x):
+            x = x.todense()
+        x_2d = tsne.fit_transform(x)
+
+        fig, ax = plt.subplots()
+        plt.figure(figsize=(6, 5))
+        names = np.array(self.categories_data["name"][:draw_cnt[0]])
+
+        for i, label in zip(range(draw_cnt[0]), names):
+            plt.scatter(x_2d[y == i, 0], x_2d[y == i, 1], label=label)
+
+        plt.legend()
+        plt.show()
 
 class ClassifierResults():
     def __init__(self, rounds, categories_data, feature_extractor, algo):
@@ -557,7 +583,7 @@ class LogRegressionAlgorithm():
 
 def main():
     ctg = Categorizer()
-    ctg.read("data/utf-8/2_final_tables/products_dns_short_sorted_utf8.csv", "data/utf-8/2_final_tables/categories_utf8.csv", cat_cnt = 40)
+    ctg.read("data/utf-8/2_final_tables/products_dns_short_sorted_utf8.csv", "data/utf-8/2_final_tables/categories_utf8.csv", cat_cnt = 20)
     # quit()
 
     # word2vec_extractor = Word2VecFeatureExtractor().initialize(ctg.descriptions, ctg.total_descriptions_cnt, 300, 4, 3, 2, 1e-3)
@@ -571,6 +597,9 @@ def main():
     biuni_word = NGramFeatureExtractor("word", (1, 2), 2000, DescriptionPreprocessor.simple_processing)
     bigram_char = NGramFeatureExtractor("char", (2, 3), 1000, DescriptionPreprocessor.special_processing)
     bigram_char_spaces = NGramFeatureExtractor("char", (2, 3), 3000, DescriptionPreprocessor.simple_processing)
+
+    ctg.draw_categories([20, 25], word2vec_extractor)
+    quit()
 
     # cr_bay = ctg.cross_validate(4, 0.75, 1000, word2vec_extractor, NaiveBayesAlgorithm(), 2)
     # cr_bay.save("output/bay_cat=30_1000_word2vec_features=300.xlsx")
