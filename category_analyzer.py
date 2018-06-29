@@ -28,6 +28,7 @@ from sklearn.model_selection import KFold
 import matplotlib.pyplot as plt
 import csv
 from sklearn.manifold import TSNE
+import utils
 
 # BASIC_ENCODING = "UTF-16"
 BASIC_ENCODING = "UTF-8"
@@ -231,11 +232,13 @@ class Categorizer():
 
     def draw_categories(self, draw_cnt, feature_extractor):
         x = np.array([], dtype=object)
+        products_name = np.array([], dtype=str)
         y = np.array([], dtype=int)
         draw_cnt[0] = min(draw_cnt[0], len(self.descriptions))
         for i in range(draw_cnt[0]):
             x = np.append(x, self.descriptions[i][:draw_cnt[1]])
             y = np.append(y, [i] * draw_cnt[1])
+            products_name = np.append(products_name, self.descriptions[i][:draw_cnt[1]])
 
         tsne = TSNE(n_components=2, random_state=0)
         x = feature_extractor.fit_transform(x)
@@ -243,15 +246,8 @@ class Categorizer():
             x = x.todense()
         x_2d = tsne.fit_transform(x)
 
-        fig, ax = plt.subplots()
-        plt.figure(figsize=(6, 5))
-        names = np.array(self.categories_data["name"][:draw_cnt[0]])
-
-        for i, label in zip(range(draw_cnt[0]), names):
-            plt.scatter(x_2d[y == i, 0], x_2d[y == i, 1], label=label)
-
-        plt.legend()
-        plt.show()
+        categories_name = np.array(self.categories_data["name"][:draw_cnt[0]])
+        utils.LabeledScatterPlot(x_2d, y, products_name, range(draw_cnt[0]), categories_name)
 
 class ClassifierResults():
     def __init__(self, rounds, categories_data, feature_extractor, algo):
@@ -583,7 +579,7 @@ class LogRegressionAlgorithm():
 
 def main():
     ctg = Categorizer()
-    ctg.read("data/utf-8/2_final_tables/products_dns_short_sorted_utf8.csv", "data/utf-8/2_final_tables/categories_utf8.csv", cat_cnt = 20)
+    ctg.read("data/utf-8/2_final_tables/products_dns_short_sorted_utf8.csv", "data/utf-8/2_final_tables/categories_utf8.csv", cat_cnt = 8)
     # quit()
 
     # word2vec_extractor = Word2VecFeatureExtractor().initialize(ctg.descriptions, ctg.total_descriptions_cnt, 300, 4, 3, 2, 1e-3)

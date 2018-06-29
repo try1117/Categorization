@@ -4,3 +4,4 @@ word2vec_models/
 models/
 output/
 cython/
+__pycache__/
