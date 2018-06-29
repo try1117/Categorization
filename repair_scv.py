@@ -9,6 +9,16 @@ import numpy as np
 from sklearn.ensemble import RandomForestClassifier
 import csv
 
+def opponents_to_dns_to_normal_csv(file_name):
+    data = pd.read_csv(file_name, encoding='UTF-16')
+    data.drop(["_Fld3044RRef"], axis="columns", inplace=True)
+    data.rename(columns={"_Fld3041RRef": "opp_product_id", "_Fld3042RRef": "dns_product_id", "_Fld3043": "type"}, inplace=True)
+    data.to_csv(file_name[:-4] + "_utf8.csv", sep=",", quoting=csv.QUOTE_ALL, index=False, encoding='UTF-8')
+    print(file_name + " done")
+
+opponents_to_dns_to_normal_csv("data/opp_to_dns.csv")
+quit()
+
 def to_normal_csv(file_name):
     data = pd.read_csv(file_name, encoding='UTF-16')
     data.to_csv(file_name[:-4] + "_utf8.csv", sep=",", quoting=csv.QUOTE_ALL, index=False, encoding='UTF-8')

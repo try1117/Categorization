@@ -89,6 +89,52 @@ class Categorizer():
             self.total_descriptions_cnt += len(self.descriptions[i])
         return self
 
+    def read_opponents(self, data_file):
+        print("Reading data from file '{}'".format(data_file))
+        self.opp_data = pd.read_csv(data_file, encoding=BASIC_ENCODING)
+
+    def category_exists(self, category_id):
+        if not hasattr(self, "categories_id_to_index"):
+            self.categories_id_to_index = dict(zip(self.categories_data["id"], range(self.cat_cnt)))
+        return category_id in self.categories_id_to_index
+
+    def category_id_to_index(self, category_id):
+        if self.category_exists(category_id):
+            return self.categories_id_to_index[category_id]
+        return NaN
+
+    def test_opponents(self, feature_extractor, predictor):
+        print("Testing opponents")
+        total_attempts, good_attempts = 0, 0
+        cat_total = np.zeros(self.cat_cnt, dtype=int)
+        cat_good = np.zeros(self.cat_cnt, dtype=int)
+
+        for index, row in self.opp_data.iterrows():
+            if (index % 50000 == 0):
+                print("Done {} %".format(100 * index / self.opp_data.shape[0]))
+            if row["type"] == 0 and not pd.isnull(row["category_id"]) and self.category_exists(row["category_id"]):
+                real_cat_index = self.category_id_to_index(row["category_id"])
+                total_attempts += 1
+                cat_total[real_cat_index] += 1
+
+                feature_vector = feature_extractor.transform([row["opp_product_description"]])[0]
+                found_cat_idx = predictor.predict([feature_vector])[0]
+                if self.categories_data.iloc[found_cat_idx]["id"] == row["category_id"]:
+                    cat_good[found_cat_idx] += 1
+                    good_attempts += 1
+
+        opp_cat_data = pd.DataFrame({"name": np.array(self.categories_data["name"]),
+            "correct": cat_good, "total": cat_total,
+            "accuracy": list(map(lambda p: 0 if p[1] == 0 else 100 * p[0] / p[1], zip(cat_good, cat_total)))},
+            columns=["name", "correct", "total", "accuracy"])
+
+        print("Total amount of records {}".format(self.opp_data.shape[0]))
+        print("Records which categories we know {} from {} = {:.2f} %".format(total_attempts, self.opp_data.shape[0],
+            100 * total_attempts / self.opp_data.shape[0]))
+        print("Total success {} from {} records = {:.2f} %".format(good_attempts, total_attempts, 100 * good_attempts / total_attempts))
+        print(opp_cat_data)
+        opp_cat_data.to_csv("output/opponents/1kk_type=0_catcnt={}.csv".format(self.cat_cnt))
+
     def k_fold_cross_validate(self, k_fold, feature_extractor, algo):
         kf = KFold(n_splits=k_fold)
         cr = ClassifierResults(k_fold, self.categories_data, feature_extractor, algo)
@@ -174,6 +220,9 @@ class Categorizer():
             train_features = feature_extractor.fit_transform(train_data)
             algo.fit(train_features, train_answers)
 
+            # FOR OPPONENTS TESTING
+            break
+
             if verbose >= 2:
                 print("Testing algorithm on trainset")
 
@@ -222,7 +271,7 @@ class Categorizer():
             print("Train avg accuracy = {:.3f}".format(100 * cr.total_train_score[r] / cr.total_train_size))
             print("Test avg accuracy = {:.3f}".format(100 * cr.total_test_score[r] / cr.total_test_size))
 
-        return cr
+        return cr, algo
 
     def output_results(self, classifier_results):
         fig, ax = plt.subplots()
@@ -470,7 +519,7 @@ class Word2VecFeatureExtractor():
         return self.make_features(data)
 
     def make_features(self, descriptions):
-        print("Processing descriptions in word2vec")
+        # print("Processing descriptions in word2vec")
         # print(descriptions.shape)
         desc_words = np.empty(len(descriptions), dtype=object)
         for i in range(len(descriptions)):
@@ -479,16 +528,17 @@ class Word2VecFeatureExtractor():
         # print(desc_words.shape)
         # quit()
 
-        print("Making feature vectors")
-        print(desc_words.shape)
+        # print("Making feature vectors")
+        # print(desc_words.shape)
         feature_vectors = np.empty((len(desc_words), self.num_features), dtype=object)
         for i in range(len(desc_words)):
             feature_vectors[i] = self.make_feature(desc_words[i])
-            if i % 1000 == 0:
+            # small arrays won't trigger this message
+            if i >= 1000 and i % 1000 == 0:
                 print("Done {} from {}".format(i + 1, len(desc_words)))
 
-        print(feature_vectors.shape)
-        print("Done")
+        # print(feature_vectors.shape)
+        # print("Done")
         return feature_vectors
 
     def make_feature(self, words):
@@ -579,7 +629,8 @@ class LogRegressionAlgorithm():
 
 def main():
     ctg = Categorizer()
-    ctg.read("data/utf-8/2_final_tables/products_dns_short_sorted_utf8.csv", "data/utf-8/2_final_tables/categories_utf8.csv", cat_cnt = 8)
+    ctg.read("data/utf-8/2_final_tables/products_dns_short_sorted_utf8.csv", "data/utf-8/2_final_tables/categories_utf8.csv", cat_cnt = 200)
+    ctg.read_opponents("data/utf-8/2_final_tables/mega_sub_1e6_filled_07.csv")
     # quit()
 
     # word2vec_extractor = Word2VecFeatureExtractor().initialize(ctg.descriptions, ctg.total_descriptions_cnt, 300, 4, 3, 2, 1e-3)
@@ -594,8 +645,8 @@ def main():
     bigram_char = NGramFeatureExtractor("char", (2, 3), 1000, DescriptionPreprocessor.special_processing)
     bigram_char_spaces = NGramFeatureExtractor("char", (2, 3), 3000, DescriptionPreprocessor.simple_processing)
 
-    ctg.draw_categories([20, 25], word2vec_extractor)
-    quit()
+    # ctg.draw_categories([20, 25], word2vec_extractor)
+    # quit()
 
     # cr_bay = ctg.cross_validate(4, 0.75, 1000, word2vec_extractor, NaiveBayesAlgorithm(), 2)
     # cr_bay.save("output/bay_cat=30_1000_word2vec_features=300.xlsx")
@@ -609,9 +660,11 @@ def main():
     # cr_regr.save("output/regr_tol=0.001_cat=100_word_features=1000.xlsx")
     # quit()
 
-    cr_forest = ctg.cross_validate(1, 0.75, 1000, word2vec_extractor, RandomForestAlgorithm(10), 2)
-    cr_forest.save("output/forest_cat=40_word2vec_features=300.xlsx")
+    cr_forest, predictor = ctg.cross_validate(1, 0.75, 1000, word2vec_extractor, RandomForestAlgorithm(10), 1)
+    ctg.test_opponents(word2vec_extractor, predictor)
     quit()
+    # cr_forest.save("output/forest_cat=40_word2vec_features=300.xlsx")
+    # quit()
 
     # cr_forest = ctg.cross_validate(4, unigram_word, RandomForestAlgorithm(10))
     # cr_forest.save("output/forest.xlsx")
