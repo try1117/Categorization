@@ -14,6 +14,8 @@ class Classifier():
         "B78C00155D03330711E647D81D5EE2A7", # "Комплектующая для сборки (СБОРКА)"
         "89CB00155D03120211E47FCF329B18E8", # "Обувь"
         "90BF00155D03120211E47ABC9E8CFEC9", # "Сим-карты; Data-комплекты (сим-карта + 3/4G модем)"
+        "B70B00155D03361B11E4B70570C9AC70", # "Коммутационное оборудование (Партнер)"
+        "858400155D03361B11E4819DFCD38E2D", # "Автомобильная шина"
     ])
 
     def read(self, data_file, categories_file, cat_cnt):
@@ -90,10 +92,10 @@ class Classifier():
 
                 feature_vector = feature_extractor.transform([row["opp_product_description"]])[0]
                 if scipy.sparse.issparse(feature_vector):
-                    feature_vector = feature_vector.todense()[0]
-                    print("dense")
-                print(feature_vector)
-                found_cat_idx = predictor.predict([feature_vector])[0]
+                    feature_vector = feature_vector.todense()
+                else:
+                    feature_vector = [feature_vector]
+                found_cat_idx = predictor.predict(feature_vector)[0]
 
                 if self.categories_data.iloc[found_cat_idx]["id"] == row["category_id"]:
                     cat_good[found_cat_idx] += 1
@@ -109,7 +111,7 @@ class Classifier():
             100 * total_attempts / self.opp_data.shape[0]))
         print("Total success {} from {} records = {:.2f} %".format(good_attempts, total_attempts, 100 * good_attempts / total_attempts))
         print(opp_cat_data)
-        opp_cat_data.to_csv("output/opponents/1kk_type=0_catcnt={}.csv".format(self.cat_cnt))
+        opp_cat_data.to_csv("output/opponents/1kk_real_type=0_catcnt={}.csv".format(self.cat_cnt))
 
     def k_fold_cross_validate(self, k_fold, feature_extractor, algo):
         kf = KFold(n_splits=k_fold)
@@ -197,7 +199,7 @@ class Classifier():
             algo.fit(train_features, train_answers)
 
             # FOR OPPONENTS TESTING
-            break
+            # break
 
             if verbose >= 2:
                 print("Testing algorithm on trainset")

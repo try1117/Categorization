@@ -28,25 +28,25 @@ class ClassifierResults():
         tr_sizes = np.array([v["size"] for v in self.train_sizes], dtype=int)
         te_sizes = np.array([v["size"] for v in self.test_sizes], dtype=int)
 
-        train_categories_data = np.transpose([100 * self.categories_train_score[k] / tr_sizes for k in range(self.rounds)])
-        test_categories_data = np.transpose([100 * self.categories_test_score[k] / te_sizes for k in range(self.rounds)])
-        train_test_delta = np.abs(train_categories_data - test_categories_data)
+        # train_categories_acc = np.array([100 * self.categories_train_score[k] / tr_sizes for k in range(self.rounds)])
+        # test_categories_acc = np.array([100 * self.categories_test_score[k] / te_sizes for k in range(self.rounds)])
 
-        train_categories_data = np.array([np.append(train_categories_data[i], [np.average(train_categories_data[i])]) for i in range(self.cat_cnt)])
-        test_categories_data = np.array([np.append(test_categories_data[i], [np.average(test_categories_data[i])]) for i in range(self.cat_cnt)])
-        train_test_delta = np.array([np.append(train_test_delta[i], [np.average(train_test_delta[i])]) for i in range(self.cat_cnt)])
+        # print(self.categories_train_score)
 
-        tr_acc = pd.DataFrame(train_categories_data, index=self.categories_name,
-            columns=["Fold {}".format(k + 1) for k in range(self.rounds)] + ["Folds avg"])
+        train_categories_acc = np.array(100 * self.categories_train_score[0] / tr_sizes)
+        test_categories_acc = np.array(100 * self.categories_test_score[0] / te_sizes)
+        train_test_delta = np.abs(train_categories_acc - test_categories_acc)
 
-        te_acc = pd.DataFrame(test_categories_data, index=self.categories_name,
-            columns=["Fold {}".format(k + 1) for k in range(self.rounds)] + ["Folds avg"])
+        # print(self.categories_train_score[0])
 
-        delta_acc = pd.DataFrame(train_test_delta, index=self.categories_name,
-            columns=["Fold {}".format(k + 1) for k in range(self.rounds)] + ["Folds avg"])
+        data = list(zip(self.categories_train_score[0], tr_sizes, train_categories_acc,
+            self.categories_test_score[0], te_sizes, test_categories_acc, train_test_delta))
 
-        # print(self.categories_train_twins)
-        # print(self.categories_test_twins)
+        # print(data[0])
+        # print(data)
+
+        acc = pd.DataFrame(data, index=self.categories_name,
+            columns=["Train correct", "Train size", "Train score", "Test correct", "Test size", "Test score", "Abs difference"])
 
         # for each category show top-3 the most similar to it categories
         train_twins_data = np.empty((self.cat_cnt, 3), dtype=object)
@@ -67,9 +67,7 @@ class ClassifierResults():
 
         feature_algo = pd.DataFrame([self.feature_extractor_info, self.algo_info], index=["Feature extractor", "Algorithm"], columns=["name", "parameters"])
 
-        tr_acc.to_excel(writer, "train accuracy")
-        te_acc.to_excel(writer, "test accuracy")
-        delta_acc.to_excel(writer, "delta between train and test")
+        acc.to_excel(writer, "accuracy")
         tr_twins.to_excel(writer, "train categories-twins")
         te_twins.to_excel(writer, "test categories-twins")
 
