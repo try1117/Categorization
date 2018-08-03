@@ -4,16 +4,49 @@ from feature_extractor import *
 from classification_algorithm import *
 import gc
 
+def extract_descriptions(file_name, column_name):
+    df = pd.read_csv(file_name)
+    tmp = np.array(df[column_name])
+    print(tmp.shape)
+    return tmp
+
+def get_descriptions():
+    data = [
+        ["data/utf-8/2_final_tables/mega_sub_1e6_filled_07.csv", "opp_product_description"],
+        # ["data/utf-8/2_final_tables/mega_sub_1e6_filled_07.csv", "dns_product_description"],
+        ["data/utf-8/2_final_tables/products_dns_short_sorted_utf8.csv", "description"],
+    ]
+
+    res = np.array([])
+    for file, column in data:
+        tmp = extract_descriptions(file, column)
+        print(tmp)
+        res = np.append(res, tmp)
+    return res
+
+def create_big_word2vec_model():
+    desc = get_descriptions()
+    print(desc.shape)
+    word2vec_extractor = Word2VecFeatureExtractor().initialize(desc, len(desc), False, 500, 1, 10)
+
 def main():
+    # create_big_word2vec_model()
+    # quit()
+
     cat_cnt = 30
     ctg = Classifier()
-    ctg.read("data/utf-8/2_final_tables/products_dns_short_sorted_utf8.csv", "data/utf-8/2_final_tables/categories_utf8.csv", cat_cnt=cat_cnt)
+    ctg.read("data/utf-8/2_final_tables/products_dns_short_sorted_utf8.csv", "data/utf-8/2_final_tables/categories_utf8.csv", cat_cnt,
+        opponents_file="data/utf-8/2_final_tables/mega_sub_filled_02.csv", throw_cnt=100)
+
     # ctg.read_opponents("data/utf-8/2_final_tables/mega_sub_1e6_filled_07.csv")
-    # ctg.read_opponents("data/utf-8/2_final_tables/mega_sub_filled_02.csv")
+    ctg.read_opponents("data/utf-8/2_final_tables/mega_sub_filled_02.csv")
     # quit()
 
     # word2vec_extractor = Word2VecFeatureExtractor().initialize(ctg.descriptions, ctg.total_descriptions_cnt, 300, 4, 3, 2, 1e-3)
-    word2vec_extractor = Word2VecFeatureExtractor().load("word2vec_models/features=300_mincount=3_context=2")
+    # Word2VecFeatureExtractor().create_model(descriptions, )
+
+    # word2vec_extractor = Word2VecFeatureExtractor().initialize(ctg.descriptions, ctg.total_descriptions_cnt, 300, 4, 3, 2, 1e-3)
+    word2vec_extractor = Word2VecFeatureExtractor().load("word2vec_models/features=500_mincount=10_context=2")
     # print(len(word2vec_extractor.index2word_set))
     # print(word2vec_extractor.index2word_set)
     # quit()
@@ -24,8 +57,8 @@ def main():
     bigram_char = NGramFeatureExtractor("char", (2, 3), 1000, DescriptionPreprocessor.special_processing)
     bigram_char_spaces = NGramFeatureExtractor("char", (2, 3), 1000, DescriptionPreprocessor.simple_processing)
 
-    ctg.draw_categories([10, 25], word2vec_extractor)
-    quit()
+    # ctg.draw_categories([10, 25], word2vec_extractor)
+    # quit()
 
     # cr_bay = ctg.cross_validate(4, 0.75, 1000, word2vec_extractor, NaiveBayesAlgorithm(), 2)
     # cr_bay.save("output/bay_cat=30_1000_word2vec_features=300.xlsx")
@@ -47,9 +80,9 @@ def main():
     # cr_forest, predictor = ctg.cross_validate(1, 0.75, 1000, bigram_char, RandomForestAlgorithm(10), 2)
     # cr_forest.save("output/prez/forest_cat={}_bigram_char.xlsx".format(cat_cnt))
 
-    # cr_forest, predictor = ctg.cross_validate(1, 0.75, 1000, bigram_char, RandomForestAlgorithm(10), 1)
-    # ctg.test_opponents(bigram_char, predictor)
-    # quit()
+    cr_forest, predictor = ctg.cross_validate(1, 0.75, 1000, word2vec_extractor, RandomForestAlgorithm(10), 1)
+    ctg.test_opponents(word2vec_extractor, predictor)
+    quit()
     # cr_forest.save("output/forest_cat=40_word2vec_features=300.xlsx")
     # quit()
 

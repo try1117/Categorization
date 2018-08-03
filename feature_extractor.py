@@ -1,6 +1,7 @@
 from shared import *
 from sklearn.feature_extraction.text import CountVectorizer
 from gensim.models import word2vec
+import gc
 
 class DescriptionPreprocessor():
     @staticmethod
@@ -50,21 +51,33 @@ class NGramFeatureExtractor():
         return {"name": "N-gram", "parameters": "type: {};\trange: {};\tfeatures: {}".format(self.analyzer, self.ngram_range, self.max_features)}
 
 class Word2VecFeatureExtractor():
-    def initialize(self, descriptions, total_descriptions_cnt, num_features, workers, min_word_count, context, downsampling):
+    def initialize(self, descriptions, total_descriptions_cnt, desc_in_categories=True, num_features=300, workers=1, min_word_count=10, context=2, downsampling=1e-3):
         self.num_features = num_features
         self.min_word_count = min_word_count
         self.context = context
 
         desc_words = np.empty(total_descriptions_cnt, dtype=object)
-        idx = 0
-        for cat_desc in descriptions:
-            for desc in cat_desc:
-                desc_words[idx] = DescriptionPreprocessor.simple_processing(desc).split()
-                idx += 1
+        if desc_in_categories:
+            idx = 0
+            for cat_desc in descriptions:
+                for desc in cat_desc:
+                    desc_words[idx] = DescriptionPreprocessor.simple_processing(desc).split()
+                    idx += 1
+        else:
+            for i in range(len(descriptions)):
+                desc_words[i] = DescriptionPreprocessor.simple_processing(str(descriptions[i])).split()
 
         import logging
         logging.basicConfig(format='%(asctime)s : %(levelname)s : %(message)s',\
             level=logging.INFO)
+
+        print(workers, num_features, min_word_count, context, downsampling)
+        print(desc_words)
+        gc.collect()
+        # with open("word2vec_models/all_descriptions.txt", "w") as f:
+            # np.save(f, desc_words)
+        # np.savetxt("word2vec_models/all_descriptions.csv", desc_words, delimiter=",", fmt="%s")
+        # quit()
 
         self.model = word2vec.Word2Vec(desc_words, workers = workers, size = num_features,
             min_count = min_word_count, window = context, sample = downsampling)

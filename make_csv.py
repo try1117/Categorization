@@ -10,6 +10,25 @@ from sklearn.ensemble import RandomForestClassifier
 import csv
 import gc
 
+def view_competitors_file():
+    for products_data in pd.read_csv("C:/Users/danilov/Desktop/KYPCA4/desktop/кон/кон.csv", encoding="UTF-16", chunksize=100):
+        print(products_data)
+        quit()
+
+
+    with open("C:/Users/danilov/Desktop/KYPCA4/desktop/competitors_utf8.csv", "r", encoding="UTF-8") as file:
+        for i in range(100):
+            print(file.readline())
+
+        quit()
+
+        chunksize = 100
+        for products_data in pd.read_csv(data_file, encoding=BASIC_ENCODING, chunksize=chunksize):
+            continue
+
+view_competitors_file();
+quit()
+
 def fill_sub_mega_table(file_opp_products, file_opp_to_dns):
     opp_to_dns_data = pd.read_csv(file_opp_to_dns, encoding="UTF-8")
     chunksize = 3 * (10 ** 5)

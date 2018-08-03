@@ -18,7 +18,7 @@ class Classifier():
         "858400155D03361B11E4819DFCD38E2D", # "Автомобильная шина"
     ])
 
-    def read(self, data_file, categories_file, cat_cnt):
+    def read(self, data_file, categories_file, cat_cnt, opponents_file, throw_cnt):
         print("Reading data from files '{}' and '{}'".format(data_file, categories_file))
         products_raw_data = pd.read_csv(data_file, encoding=BASIC_ENCODING)
         categories_raw_data = pd.read_csv(categories_file, encoding=BASIC_ENCODING)
@@ -26,7 +26,9 @@ class Classifier():
         self.categories_data = pd.DataFrame({"id": np.empty(cat_cnt, dtype=str), "size": np.empty(cat_cnt, dtype=str),
             "name": np.empty(cat_cnt, dtype=str)}, columns=["id", "size", "name"])
 
-        print("Reading descriptions")
+        opponents_raw_data = pd.read_csv(opponents_file, encoding=BASIC_ENCODING)
+
+        print("Reading dns descriptions")
         products_index = 0
         self.cat_cnt = cat_cnt
         self.descriptions = np.empty(cat_cnt, dtype=object)
@@ -53,6 +55,41 @@ class Classifier():
             if ((i + 1) % 10 == 0):
                 print("Processing | categories: {:02d} from {:02d} | descriptions: {}".format(i + 1, cat_cnt, products_index))
             # print(cat_real_size[i], cur_category_name)
+
+        print("Reading opponents descriptions")
+        # select opponent's descriptions, which have
+        # "type": "0" and "category_id" in our top-'cat-cnt' categories
+        good_opponents = np.zeros(opponents_raw_data.shape[0], dtype=int)
+        good_opponents_cnt = 0
+        for index, row in opponents_raw_data.iterrows():
+            if (row["type"] == 0) and self.category_exists(row["category_id"]):
+                good_opponents[good_opponents_cnt] = index
+                good_opponents_cnt += 1
+
+        good_opponents = np.array(good_opponents[:good_opponents_cnt])
+        np.random.shuffle(good_opponents)
+
+        print(good_opponents_cnt)
+        print(good_opponents)
+
+        # add some opponent's records into 'descriptions'
+        # self.opp_desc_throwed = np.array([[] for i in range(cat_cnt)]) i tried(
+        self.opp_desc_throwed = np.empty(cat_cnt, dtype=object)
+        for i in range(cat_cnt):
+            self.opp_desc_throwed[i] = np.array([], dtype=str)
+        self.opponents_ignore_indices = set()
+
+        for i in range(good_opponents_cnt):
+            row = opponents_raw_data.iloc[good_opponents[i]]
+            # print(row)
+            # print(row["category_id"])
+            cat_id = self.category_id_to_index(row["category_id"])
+            # print(cat_id)
+            if (len(self.opp_desc_throwed[cat_id]) < throw_cnt):
+                self.opp_desc_throwed[cat_id] = np.append(self.opp_desc_throwed[cat_id], [row["opp_product_description"]])
+                self.opponents_ignore_indices.add(good_opponents[i])
+
+        print(len(self.opponents_ignore_indices))
 
         # shuffle and lower descriptions
         self.total_descriptions_cnt = 0
@@ -81,10 +118,24 @@ class Classifier():
         total_attempts, good_attempts = 0, 0
         cat_total = np.zeros(self.cat_cnt, dtype=int)
         cat_good = np.zeros(self.cat_cnt, dtype=int)
+        cat_bad = np.empty((self.cat_cnt, self.cat_cnt), dtype=object)
+        for i in range(self.cat_cnt):
+            for j in range(self.cat_cnt):
+                cat_bad[i][j] = [0, j]
+
+        bad_descriptions = np.empty((self.cat_cnt, self.cat_cnt), dtype=object)
+        for i in range(self.cat_cnt):
+            for j in range(self.cat_cnt):
+                bad_descriptions
 
         for index, row in self.opp_data.iterrows():
+            # check if this record was in train-set
+            if index in self.opponents_ignore_indices:
+                continue
+
             if (index % 50000 == 0):
                 print("Done {} %".format(100 * index / self.opp_data.shape[0]))
+                # break
             if row["type"] == 0 and not pd.isnull(row["category_id"]) and self.category_exists(row["category_id"]):
                 real_cat_index = self.category_id_to_index(row["category_id"])
                 total_attempts += 1
@@ -100,18 +151,59 @@ class Classifier():
                 if self.categories_data.iloc[found_cat_idx]["id"] == row["category_id"]:
                     cat_good[found_cat_idx] += 1
                     good_attempts += 1
+                else:
+                    cat_bad[real_cat_index][found_cat_idx][0] += 1;
 
         opp_cat_data = pd.DataFrame({"name": np.array(self.categories_data["name"]),
             "correct": cat_good, "total": cat_total,
             "accuracy": list(map(lambda p: 0 if p[1] == 0 else 100 * p[0] / p[1], zip(cat_good, cat_total)))},
             columns=["name", "correct", "total", "accuracy"])
 
+        for i in range(self.cat_cnt):
+            cat_bad[i] = sorted(cat_bad[i], reverse=True)
+
+        print(cat_bad)
+
+        top_n = 5
+        twins_top = np.empty((self.cat_cnt, top_n), dtype=object)
+        for i in range(self.cat_cnt):
+            for j in range(top_n):
+                cnt = cat_bad[i][j][0]
+                idx = cat_bad[i][j][1]
+                twins_top[i][j] = ("{:.02f}".format(100 * cnt / max(1, cat_total[i])), self.categories_data.iloc[idx]["name"])
+
+        print(twins_top)
+        df_twins = pd.DataFrame(twins_top, index=np.array(self.categories_data["name"]), columns=["Top-"+str(i+1) for i in range(top_n)])
+
+        score_rows = [
+            "Total amount of records {}".format(self.opp_data.shape[0]),
+            "Records which categories we know {} from {} = {:.2f} %".format(total_attempts, self.opp_data.shape[0],
+            100 * total_attempts / max(1, self.opp_data.shape[0])),
+            "Total success {} from {} records = {:.2f} %".format(good_attempts, total_attempts, 100 * good_attempts / max(1, total_attempts))
+        ]
+
+        df_scores = pd.DataFrame(score_rows, columns=["."])
+
+        print(feature_extractor.get_information()["name"])
+        print(predictor.get_information()["name"])
+
+        writer = pd.ExcelWriter("output/opponents_new/" + str(self.cat_cnt) +
+            "_" + str(total_attempts) +
+            "_" + feature_extractor.get_information()["name"] +
+            "_" + predictor.get_information()["name"] +
+            ".xlsx")
+
+        opp_cat_data.to_excel(writer, "table")
+        df_twins.to_excel(writer, "twins")
+        df_scores.to_excel(writer, "scores")
+        writer.save()
+
         print("Total amount of records {}".format(self.opp_data.shape[0]))
-        print("Records which categories we know {} from {} = {:.2f} %".format(total_attempts, self.opp_data.shape[0],
+        print("Records which categories we know {} from {} = {:.2f} %".format(total_attempts, max(1, self.opp_data.shape[0]),
             100 * total_attempts / self.opp_data.shape[0]))
-        print("Total success {} from {} records = {:.2f} %".format(good_attempts, total_attempts, 100 * good_attempts / total_attempts))
+        print("Total success {} from {} records = {:.2f} %".format(good_attempts, total_attempts, 100 * good_attempts / max(1, total_attempts)))
         print(opp_cat_data)
-        opp_cat_data.to_csv("output/opponents/1kk_real_type=0_catcnt={}.csv".format(self.cat_cnt))
+        # opp_cat_data.to_csv("output/opponents_new/1000k_word2vec_type=0_catcnt={}.csv".format(self.cat_cnt))
 
     def k_fold_cross_validate(self, k_fold, feature_extractor, algo):
         kf = KFold(n_splits=k_fold)
@@ -191,6 +283,26 @@ class Classifier():
                 right = cr.train_sizes[i]["right"]
                 train_data[left:right] = tr
                 train_answers[left:right] = i
+
+            # IMPORTANT
+            # insert opponents records into trainset
+            opp_train_data = np.array([], dtype=object)
+            opp_train_answers = np.array([], dtype=int)
+            for i in range(self.cat_cnt):
+                opp_train_data = np.append(opp_train_data, self.opp_desc_throwed[i])
+                opp_train_answers = np.append(opp_train_answers, [i for j in range(len(self.opp_desc_throwed[i]))])
+
+            print(train_data.shape)
+            print(train_answers.shape)
+
+            print(opp_train_data.shape)
+            print(opp_train_answers.shape)
+
+            train_data = np.append(train_data, opp_train_data)
+            train_answers = np.append(train_answers, opp_train_answers)
+
+            print(train_data.shape)
+            print(train_answers.shape)
 
             if verbose >= 2:
                 print("Fitting data")
@@ -275,4 +387,3 @@ class Classifier():
 
         categories_name = np.array(self.categories_data["name"][:draw_cnt[0]])
         utils.LabeledScatterPlot(x_2d, y, products_name, range(draw_cnt[0]), categories_name)
-
